@@ -1,0 +1,12 @@
+.git
+.venv
+**/node_modules
+web/dist
+akshauhini/static
+*.egg-info
+*.sqlite*
+**/__pycache__
+.pytest_cache
+test-results
+playwright-report
+sample_projects

@@ -1,0 +1,134 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Version",
+      "type": "string"
+    },
+    "event_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Event Id",
+      "type": "string"
+    },
+    "run_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "type": {
+      "anyOf": [
+        {
+          "enum": [
+            "run.started",
+            "run.completed",
+            "run.failed",
+            "agent.created",
+            "agent.failed",
+            "task.created",
+            "task.assigned",
+            "task.accepted",
+            "task.started",
+            "task.progress",
+            "task.waiting",
+            "task.completed",
+            "task.cancelled",
+            "task.failed",
+            "llm.started",
+            "llm.completed",
+            "llm.failed",
+            "tool.call.started",
+            "tool.call.completed",
+            "tool.call.failed",
+            "tool.queued",
+            "tool.retry",
+            "message.sent",
+            "handoff.started",
+            "handoff.completed",
+            "review.started",
+            "review.approved",
+            "review.rejected",
+            "human.requested",
+            "human.approved",
+            "human.rejected",
+            "artifact.created",
+            "agent.updated",
+            "agent.removed",
+            "agent.progress",
+            "question.asked",
+            "question.received",
+            "question.routed",
+            "question.answered",
+            "question.cancelled",
+            "resource.updated",
+            "tool.dequeued"
+          ],
+          "type": "string"
+        },
+        {
+          "pattern": "^x\\.[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$",
+          "type": "string"
+        }
+      ],
+      "title": "Type"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "agent_id": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Id"
+    },
+    "task_id": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Id"
+    },
+    "operation_id": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Operation Id"
+    },
+    "data": {
+      "additionalProperties": true,
+      "title": "Data",
+      "type": "object"
+    }
+  },
+  "required": [
+    "run_id",
+    "type"
+  ],
+  "title": "Event",
+  "type": "object"
+}

@@ -1,0 +1,35 @@
+import {AOEvent} from './engine';
+export function demoEvents():AOEvent[]{
+ const result:AOEvent[]=[];let seq=0;const base=Date.parse('2026-01-01T12:00:00Z');
+ const add=(sec:number,type:string,agent_id?:string,task_id?:string,data:Record<string,unknown>={},operation_id?:string)=>result.push({event_id:`demo-${++seq}`,seq,run_id:'demo-office',type,agent_id,task_id,data,operation_id,timestamp:new Date(base+sec*1000).toISOString()});
+ add(0,'run.started',undefined,undefined,{title:'Research to report · demonstration'});
+ for(const [id,name,role,department] of [['manager','Morgan','manager','Operations'],['researcher','Riley','researcher','Research'],['analyst','Alex','analyst','Intelligence'],['engineer','Eden','coder','Engineering'],['writer','Wren','writer','Editorial'],['reviewer','Robin','reviewer','Quality']])add(0,'agent.created',id,undefined,{name,role,department,model:'Demo model'});
+ add(1,'task.created','manager','report',{title:'Prepare research brief'});
+ add(2,'task.assigned','manager','report',{target_agent_id:'researcher'});
+ add(4,'task.accepted','researcher','report');add(5,'tool.call.started','researcher','report',{tool:'web_search'},'search-1');
+ add(5,'resource.updated','researcher',undefined,{tool:'web_search',capacity:2,active_agents:['researcher'],waiting_agents:[]});
+ add(5,'task.created','manager','draft',{title:'Write final brief'});
+ add(6,'task.waiting','writer','draft',{title:'Write final brief',reason:'Waiting for research'});
+ add(7,'task.started','engineer','code',{title:'Validate source data'});
+ add(8,'resource.updated','engineer',undefined,{tool:'python',capacity:1,active_agents:['engineer'],waiting_agents:[]});
+ add(8,'tool.call.started','engineer','code',{tool:'python'},'code-1');
+ add(9,'tool.queued','writer','draft',{tool:'python',reason:'python slot full'});
+ add(10,'tool.call.failed','engineer','code',{tool:'python',error:'Schema mismatch',duration_ms:2000},'code-1');
+ add(12,'resource.updated','engineer',undefined,{tool:'python',capacity:1,active_agents:[],waiting_agents:[]});
+ add(12,'tool.retry','engineer','code',{tool:'python',attempt:2});
+ add(13,'resource.updated','engineer',undefined,{tool:'python',capacity:1,active_agents:['engineer'],waiting_agents:[]});
+ add(13,'tool.call.started','engineer','code',{tool:'python'},'code-2');
+ add(14,'tool.call.completed','researcher','report',{tool:'web_search',duration_ms:9000},'search-1');
+ add(14,'resource.updated','researcher',undefined,{tool:'web_search',capacity:2,active_agents:[],waiting_agents:[]});
+ add(15,'artifact.created','researcher','report',{name:'Source collection'});add(16,'handoff.started','researcher','report',{target_agent_id:'analyst'});
+ add(18,'handoff.completed','analyst','report',{target_agent_id:'analyst'});add(19,'llm.started','analyst','report',{input_tokens:18400},'analysis');
+ add(20,'tool.call.completed','engineer','code',{duration_ms:7000},'code-2');add(21,'task.completed','engineer','code');
+ add(24,'llm.completed','analyst','report',{input_tokens:18400,output_tokens:1240,duration_ms:5000},'analysis');
+ add(25,'message.sent','analyst','report',{target_agent_id:'writer',participants:['analyst','writer','reviewer']});
+ add(28,'handoff.started','analyst','report',{target_agent_id:'writer'});add(30,'handoff.completed','writer','report');
+ add(31,'llm.started','writer','report',{input_tokens:7200},'writing');add(36,'llm.completed','writer','report',{duration_ms:5000,output_tokens:2100},'writing');
+ add(37,'artifact.created','writer','report',{name:'Research brief.pdf'});add(38,'handoff.started','writer','report',{target_agent_id:'reviewer'});
+ add(40,'review.started','reviewer','report');add(44,'review.approved','reviewer','report');add(45,'human.requested','reviewer','report');
+ add(49,'human.approved','reviewer','report');add(50,'handoff.started','reviewer','report',{target_agent_id:'manager'});
+ add(53,'handoff.completed','manager','report');add(54,'task.completed','manager','report');add(54,'task.completed','writer','draft');add(55,'run.completed');return result;
+}

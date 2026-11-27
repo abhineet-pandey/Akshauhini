@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+*.sqlite*
+node_modules/
+dist/
+akshauhini/static/
+.DS_Store
+test-results/
+playwright-report/
+build/
+sample_projects/request_studio/outputs/
+.venv-linux/
+
+# Local AI tool state
+.claude/
+.codex/

@@ -1,0 +1,48 @@
+import {test,expect} from '@playwright/test';
+import {showTeam} from './helpers';
+test('request-driven demo output matches the office and manager routes findings questions',async({page,request})=>{
+ await page.goto('http://127.0.0.1:8766');
+ await page.getByLabel('What should the team find out?').fill('Compare offline editing and CSV support');
+ await page.getByLabel('Requirements · one per line').fill('offline editing\nCSV exports\nunknown pricing');
+ await page.getByLabel('Your source documents · optional').fill('Atlas supports offline editing.\nAtlas exports CSV.\nBeacon requires an internet connection.');
+ const created=page.waitForResponse(r=>r.url().endsWith('/api/requests')&&r.request().method()==='POST');
+ await page.getByRole('button',{name:'Send request to the team →'}).click();
+ const session=await (await created).json();
+ await expect(page.locator('#status')).toContainText('completed',{timeout:30000});
+ const result=await (await request.get(`http://127.0.0.1:8766/api/requests/${session.run_id}`)).json();
+ expect(result.report).toContain('Atlas supports offline editing.');
+ expect(result.report).toContain('MISSING EVIDENCE');
+ await expect(page.locator('#report')).toHaveText(result.report);
+ await page.screenshot({path:'test-results/request-studio.png',fullPage:true});
+ await page.goto('/?run='+session.run_id);
+ await showTeam(page);
+ await expect(page.getByRole('button',{name:/Maya Chen.*Complete/})).toBeVisible();
+ await expect(page.locator('.work-details pre')).toHaveText(result.report);
+ await page.getByRole('button',{name:/Ask manager/}).click();
+ const dialog=page.getByRole('dialog',{name:'Ask an agent'});
+ await dialog.getByLabel('Your question').fill('Which source supports offline editing?');
+ await dialog.getByRole('button',{name:'Send question',exact:true}).click();
+ await expect(dialog.locator('.route-trace')).toContainText('manager→researcher',{timeout:15000});
+ await expect(dialog.locator('.finding-card').first()).toContainText('Atlas supports offline editing.');
+ await expect(dialog.locator('.question-history small').first()).toContainText('researcher · answered');
+ await page.screenshot({path:'test-results/routed-answer.png',fullPage:true});
+});
+
+test('workspace uses full width and settings expose both model choices',async({page})=>{
+ await page.setViewportSize({width:1920,height:1080});
+ await page.route('**/api/ollama/models',route=>route.fulfill({json:{available:true,models:['chat-local','embed-local']}}));
+ await page.route('**/api/settings',route=>route.fulfill({json:route.request().method()==='PUT'?{...route.request().postDataJSON(),ollama_url:'http://127.0.0.1:11434'}:{llm_model:null,embedding_model:null,ollama_url:'http://127.0.0.1:11434'}}));
+ await page.goto('/');await page.getByRole('button',{name:'Close projects'}).click();
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.getByRole('combobox',{name:'Chat model',exact:true}).selectOption('chat-local');
+ await page.getByRole('combobox',{name:'Embedding model',exact:true}).selectOption('embed-local');
+ await page.getByRole('button',{name:'Save model settings'}).click();
+ await expect(page.getByRole('status')).toContainText('Settings saved');
+ await page.getByRole('button',{name:'Close settings'}).click();
+ const bounds=await page.locator('.workspace').boundingBox();expect(bounds!.width).toBeGreaterThan(1800);
+ await page.getByRole('button',{name:'Expand workspace'}).click();
+ await expect(page.getByRole('button',{name:'Restore workspace'})).toBeVisible();
+ await expect.poll(async()=>{const box=await page.locator('canvas').boundingBox();return box?.height??0;}).toBeGreaterThan(800);
+ await page.getByRole('button',{name:'Restore workspace'}).click();
+ await expect(page.locator('.expanded-workspace')).toHaveCount(0);
+});

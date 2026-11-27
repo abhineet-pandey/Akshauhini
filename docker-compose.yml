@@ -1,0 +1,17 @@
+name: akshauhini
+services:
+  collector:
+    build: .
+    environment:
+      AKSHAUHINI_OLLAMA_URL: ${AKSHAUHINI_OLLAMA_URL:-http://host.docker.internal:11434}
+      AKSHAUHINI_OLLAMA_MODEL: ${AKSHAUHINI_OLLAMA_MODEL:-}
+    volumes:
+      - akshauhini_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8765:8765"
+    restart: unless-stopped
+
+volumes:
+  akshauhini_data:

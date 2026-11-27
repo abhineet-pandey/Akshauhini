@@ -1,0 +1,8 @@
+Akshauhini
+Copyright 2026 Abhineet Pandey
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It bundles third-party software in its web UI (React, PixiJS and their
+dependencies, and Lucide icons), each under its own license. See
+akshauhini/THIRD_PARTY_NOTICES.md for their copyright notices and license texts.
