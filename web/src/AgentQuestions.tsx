@@ -10,8 +10,20 @@ type Question = {
 };
 type Models = {available:boolean;models:string[];default_model?:string;error?:string};
 
+/** run.completed / run.failed: `akshauhini run` sends these once the app's process has exited, so nothing is left to collect questions. */
+export const runEnded=(runStatus?:string)=>runStatus==='completed'||runStatus==='failed';
+
+function EndedRunNotice({llm}:{llm:boolean}){
+  return(
+    <p className="muted q-ended" role="status">
+      This run has ended, so its app is probably no longer running to answer questions.
+      {llm?' Choose “Local LLM” to summarize what it recorded, or':' To ask an agent directly,'} run the app again with a question handler (<code>office.answer_questions</code>).
+    </p>
+  );
+}
+
 // ── Per-agent Q&A panel ──────────────────────────────────────────────────────
-export function AgentQuestions({run,agent,live}:{run:string;agent:Agent;live:boolean}){
+export function AgentQuestions({run,agent,live,ended=false}:{run:string;agent:Agent;live:boolean;ended?:boolean}){
   const [question,setQuestion]=useState('What have you completed, and what are you waiting for?');
   const [history,setHistory]=useState<Question[]>([]);
   const [source,setSource]=useState('agent');
@@ -94,6 +106,7 @@ export function AgentQuestions({run,agent,live}:{run:string;agent:Agent;live:boo
             </label>
             <p className="muted">{models.available?'Summarizes recorded data; does not contact the agent directly.':models.error??'The local LLM is not running. Start it on localhost:11434.'}</p>
           </>}
+          {ended&&source==='agent'&&<EndedRunNotice llm/>}
           <form onSubmit={e=>{e.preventDefault();void ask();}}>
             <label htmlFor="agent-question">Your question</label>
             <textarea id="agent-question" maxLength={2000} value={question} onChange={e=>setQuestion(e.target.value)} rows={3}/>
@@ -104,15 +117,15 @@ export function AgentQuestions({run,agent,live}:{run:string;agent:Agent;live:boo
             </button>
           </form>
           {error&&<p className="error" role="alert">{error}</p>}
-          <QuestionHistory history={history} agentName={agent.name} onCancel={cancel}/>
+          <QuestionHistory history={history} agentName={agent.name} onCancel={cancel} ended={ended}/>
         </>}
     </section>
   );
 }
 
 // ── Shared question history list ─────────────────────────────────────────────
-export function QuestionHistory({history,agentName,onCancel}:{
-  history:Question[];agentName:string;onCancel:(id:string)=>void;
+export function QuestionHistory({history,agentName,onCancel,ended=false}:{
+  history:Question[];agentName:string;onCancel:(id:string)=>void;ended?:boolean;
 }){
   if(!history.length)return null;
   return(
@@ -145,6 +158,8 @@ export function QuestionHistory({history,agentName,onCancel}:{
             : <p className="muted q-pending">
                 {q.status==='cancelled'
                   ? 'Question cancelled.'
+                  : ended&&q.status==='pending'
+                    ? 'Not collected: this run has ended, so its app is probably no longer running. Cancel it, or ask the Local LLM instead.'
                   : q.status==='pending'
                     ? 'Waiting for the app to collect this question. Its responder must be running.'
                     : 'Delivered; awaiting agent response.'}
@@ -233,6 +248,7 @@ export function GlobalAskPanel({state,run,live,onClose}:{
         </div>
         <p className="muted">Ask any agent about their findings, status, or next steps. The manager can route your question to the right specialist.</p>
         {!live&&<p className="error">Switch to Live mode to contact agents.</p>}
+        {live&&runEnded(state.runStatus)&&<EndedRunNotice llm={false}/>}
         <form onSubmit={submit}>
           <label>Route to
             <select value={targetId} onChange={e=>setTargetId(e.target.value)}>
@@ -256,7 +272,7 @@ export function GlobalAskPanel({state,run,live,onClose}:{
         </form>
         {error&&<p className="error">{error}</p>}
         {sent&&(
-          <div className="gap-sent"><QuestionHistory history={[sent]} agentName={state.agents[sent.agent_id??targetId]?.name??targetId} onCancel={cancelSent}/></div>
+          <div className="gap-sent"><QuestionHistory history={[sent]} agentName={state.agents[sent.agent_id??targetId]?.name??targetId} onCancel={cancelSent} ended={runEnded(state.runStatus)}/></div>
         )}
       </div>
     </div>

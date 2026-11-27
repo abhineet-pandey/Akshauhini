@@ -52,6 +52,16 @@ test('streams real events and replays a persisted run',async({page,request})=>{
  await expect(page.getByRole('button',{name:/Browser Agent.*Complete/})).toBeVisible();
 });
 
+test('an ended run explains that its app can no longer answer questions',async({page,request})=>{
+ const run='ended-'+Date.now(),base=Date.now();const make=(type:string,n:number,extra:object={})=>({event_id:run+'-'+n,run_id:run,type,timestamp:new Date(base+n*100).toISOString(),...extra});
+ await request.post('/api/events',{data:[make('run.started',0,{data:{title:'python finished.py'}}),make('agent.created',1,{agent_id:'done-agent',data:{name:'Done Agent',role:'analyst'}}),make('run.completed',2,{data:{exit_code:0}})]});
+ await page.goto('/?run='+run);await showTeam(page);
+ await page.getByRole('button',{name:/Done Agent/}).click();
+ await expect(page.getByText('This run has ended, so its app is probably no longer running',{exact:false})).toBeVisible();
+ await page.getByRole('button',{name:'Ask agent',exact:true}).click();
+ await expect(page.getByText('Not collected: this run has ended',{exact:false})).toBeVisible();
+});
+
 test('dynamic connected agent answers questions and updates blocked progress',async({page,request})=>{
  const run='questions-'+Date.now(),url=`/api/runs/${run}/agents/custom-a/questions`;
  await request.post('/api/apps/connect',{data:{app_id:'test-app',name:'Custom Agentic App',run_id:run,agents:[{agent_id:'custom-a',name:'Source Verifier',role:'critic',department:'Verification'}]}});

@@ -6,7 +6,7 @@ import {Dataflow} from './Dataflow';
 import {AOEvent,OfficeEngine,isManagerRole,runBadge} from './engine';
 import {demoEvents} from './demo';
 import './style.css';
-import {AgentQuestions,ProgressDetails,GlobalAskPanel} from './AgentQuestions';
+import {AgentQuestions,ProgressDetails,GlobalAskPanel,runEnded} from './AgentQuestions';
 import {Projects,Run,ProjectsTab,groupProjects,runName} from './Projects';
 import {LocalOffice} from './LocalOffice';
 import {RenameAgent} from './RenameAgent';
@@ -481,7 +481,7 @@ function App(){
                 </button>
 
                 {/* Ask this agent */}
-                <AgentQuestions key={`${mode}:${run}:${a.id}`} run={run} agent={a} live={mode==='live'&&!!run}/>
+                <AgentQuestions key={`${mode}:${run}:${a.id}`} run={run} agent={a} live={mode==='live'&&!!run} ended={runEnded(state.runStatus)}/>
 
                 {/* Progress */}
                 <ProgressDetails agent={a}/>
