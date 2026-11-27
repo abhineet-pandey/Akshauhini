@@ -1,10 +1,24 @@
 name: Test and publish
 
+# Every push and pull request: test + build (nothing is published).
+# Tag vX.Y.Z:            build -> TestPyPI -> install check from TestPyPI -> PyPI (waits for approval).
+# Tag vX.Y.Zrc1 / a1 / b1: build -> TestPyPI -> install check (pre-releases never reach PyPI).
+# "Run workflow" button: build -> TestPyPI -> install check.
+# See docs/RELEASING.md for the one-time trusted-publisher and environment setup.
+
 on:
   push:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -24,12 +38,25 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "22", cache: npm, cache-dependency-path: web/package-lock.json }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
+      - name: Read version (and check it matches the tag)
+        id: version
+        run: |
+          version=$(python -c "import re,pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('akshauhini/__init__.py').read_text()).group(1))")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "prerelease=false" >> "$GITHUB_OUTPUT"; else echo "prerelease=true" >> "$GITHUB_OUTPUT"; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match __version__ = $version in akshauhini/__init__.py"; exit 1
+          fi
+          echo "Version $version"
       - name: Build web UI into the package
         run: |
           cd web && npm ci && npm test && npm run build && cd ..
@@ -47,12 +74,54 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: dist, path: dist/ }
 
-  publish:
-    # Tag a release (git tag v0.1.0 && git push --tags) after adding a "pypi" environment and a PyPI trusted publisher.
-    if: startsWith(github.ref, 'refs/tags/v')
+  publish-testpypi:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
-    environment: pypi
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/akshauhini/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist/ }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # TestPyPI is a rehearsal: re-running a version that is already there must not fail the release.
+          skip-existing: true
+
+  verify-testpypi:
+    needs: [build, publish-testpypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install the uploaded version from TestPyPI and start it
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python -m venv /tmp/check
+          # Dependencies come from the real PyPI; only akshauhini itself is taken from TestPyPI (--no-deps),
+          # so a look-alike package on TestPyPI can never be installed in its place.
+          /tmp/check/bin/pip install "fastapi>=0.115,<1" "uvicorn[standard]>=0.30,<1" "httpx>=0.27,<1"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            /tmp/check/bin/pip install --no-deps --no-cache-dir --index-url https://test.pypi.org/simple/ "akshauhini==$VERSION" && break
+            echo "TestPyPI has not indexed $VERSION yet; retrying in 15 s"; sleep 15
+          done
+          /tmp/check/bin/akshauhini --version | grep -F "$VERSION"
+          (cd /tmp && AKSHAUHINI_HOME=/tmp/ak /tmp/check/bin/akshauhini --port 8791 serve &) && sleep 4
+          curl -sf http://127.0.0.1:8791/api/health && curl -sf http://127.0.0.1:8791/ | grep -q '<div id="root">'
+
+  publish-pypi:
+    # Only final versions (X.Y.Z) from a tag, only after TestPyPI worked, and only after you approve the "pypi" environment.
+    if: startsWith(github.ref, 'refs/tags/v') && needs.build.outputs.prerelease == 'false'
+    needs: [build, verify-testpypi]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/akshauhini/${{ needs.build.outputs.version }}/
     permissions:
       id-token: write
     steps:
