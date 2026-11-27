@@ -57,7 +57,7 @@ Start the office:
 akshauhini
 ```
 
-This starts the collector in the background and opens http://127.0.0.1:8765.
+This starts the collector in the background and opens http://127.0.0.1:8765. If another program already uses port 8765, a free port is chosen and printed instead; your apps find it automatically.
 
 Instrument a Python agent:
 
@@ -85,7 +85,7 @@ A typical workflow is to start the office, connect an application, monitor its r
 akshauhini
 ```
 
-The office starts in the background and opens http://127.0.0.1:8765 in your browser. To run it in the current terminal instead, use:
+The office starts in the background and opens http://127.0.0.1:8765 (or a free port, if another program holds 8765) in your browser. To run it in the current terminal instead, use:
 
 ```bash
 akshauhini serve --open
@@ -156,7 +156,7 @@ Questions are answered by a model served by [Ollama](https://ollama.com) on this
 
 ```bash
 akshauhini status   # Show whether the office is running and which applications have reported
-akshauhini stop     # Stop the background office
+akshauhini stop     # Stop the running office
 ```
 
 ## Command-line reference
@@ -175,7 +175,7 @@ Global options must be placed before the command, for example `akshauhini --port
 
 | Option | Description |
 | --- | --- |
-| `--port PORT` | Port of the office (default `8765`, or the value of `AKSHAUHINI_PORT`) |
+| `--port PORT` | Port of the office (default `AKSHAUHINI_PORT`, else `8765`, or a free port when another program holds 8765). An explicit port is never replaced: if it is busy, the command stops with an error |
 | `--version` | Print the installed version and exit |
 | `-h`, `--help` | Show help and exit. Also available for each command, for example `akshauhini serve --help` |
 
@@ -429,7 +429,7 @@ You can ask a question about a single session, a single agent or all agents (pre
 | `AKSHAUHINI_DB` | Path to the SQLite database (default `~/.akshauhini/akshauhini.sqlite`) |
 | `AKSHAUHINI_LOCAL_AGENTS=0` | Disable the Local agents feature (same as `serve --no-local-agents`) |
 | `AKSHAUHINI_ALLOW_REMOTE_LLM=1` | Allow cloud-tagged Ollama models and non-loopback Ollama URLs |
-| `AKSHAUHINI_PORT` or `--port` | Collector port (default `8765`) |
+| `AKSHAUHINI_PORT` or `--port` | Collector port. Unset: `8765`, or a free port when another program holds it. The running office's port is recorded in `~/.akshauhini/office.json`, so apps and commands find it |
 | `AKSHAUHINI_OLLAMA_MODEL` | Ollama model used for questions and summaries |
 | `AKSHAUHINI_OLLAMA_URL` | Ollama server URL (default `http://127.0.0.1:11434`) |
 | `serve --host` | Bind address (default `127.0.0.1`) |
@@ -566,4 +566,4 @@ Akshauhini is released under the [Apache License 2.0](https://www.apache.org/lic
 
 If you use Akshauhini in published research, please cite this repository.
 
-The web UI bundles third-party open-source components (React, PixiJS and their dependencies, and Lucide icons), each under its own permissive license; see [THIRD_PARTY_NOTICES.md](https://github.com/abhineet-pandey/Akshauhini/blob/main/akshauhini/THIRD_PARTY_NOTICES.md). The DM Sans, DM Mono, Manrope and Press Start 2P fonts are served by Google Fonts under the SIL Open Font License.
+The web UI bundles third-party open-source components (React, PixiJS and their dependencies, and Lucide icons), each under its own permissive license; see [THIRD_PARTY_NOTICES.md](https://github.com/abhineet-pandey/Akshauhini/blob/main/akshauhini/THIRD_PARTY_NOTICES.md). The DM Sans, DM Mono, Manrope, Press Start 2P and Noto Sans Devanagari fonts are served by Google Fonts under the SIL Open Font License.

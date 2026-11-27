@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=Manrope:wght@400;500;600;700;800&family=Press+Start+2P&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@700&text=%E0%A4%85&display=swap');
 
 /* ── Design Tokens: all color themes share the same token names, so every ──
    component below is theme-agnostic. "Cool" (default) is the original dark
@@ -2403,8 +2404,8 @@ body {
 }
 
 .brand-icon {
-  font-family: Manrope, sans-serif;
-  font-size: 19px;
+  font-family: 'Noto Sans Devanagari', Manrope, sans-serif;
+  font-size: 22px;
   letter-spacing: -1px;
   color: #031018;
   background: linear-gradient(145deg, var(--accent), var(--cyan));
@@ -2433,7 +2434,7 @@ body {
 }
 
 .product-mark span {
-  font: 800 18px/1 Manrope, sans-serif;
+  font: 700 21px/1 'Noto Sans Devanagari', Manrope, sans-serif;
   color: var(--accent);
 }
 

@@ -27,7 +27,7 @@ source .venv/bin/activate
 akshauhini serve
 ```
 
-Open http://127.0.0.1:8765. If installing from source for the first time, follow README.md to install Python dependencies and build the web UI.
+Open the address it prints: http://127.0.0.1:8765, or a free port if another program already uses 8765 (apps on this machine find it automatically). The office listens on 127.0.0.1 only; `akshauhini serve --host 0.0.0.0` exposes it to your network. If installing from source for the first time, follow README.md to install Python dependencies and build the web UI.
 
 ## 2. Install the SDK into your other app
 

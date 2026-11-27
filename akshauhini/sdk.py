@@ -13,7 +13,12 @@ from .models import ProgressReport, Connection
 from .responder import Responder
 from .resources import Resource
 from threading import Lock
+from . import config
 from .config import default_endpoint, home
+
+
+class PortInUse(RuntimeError):
+    """The office's port is held by a program that is not a compatible Akshauhini office."""
 
 
 def collector_running(endpoint):
@@ -21,15 +26,62 @@ def collector_running(endpoint):
 
     A closed loopback port is not always refused immediately: Windows retries for about two seconds, so a short
     probe times out instead of raising ConnectError. Both mean that no collector is there.
+    Raises PortInUse when something else answers there (another web server, a non-HTTP program, an incompatible version).
     """
     try:
         response = httpx.get(f"{endpoint}/api/health", timeout=1, trust_env=False)
-        response.raise_for_status()
-        if response.json().get("protocol") != "1.0":
-            raise RuntimeError("Port is occupied by an incompatible service")
-        return True
     except (httpx.ConnectError, httpx.ConnectTimeout):
         return False
+    except httpx.HTTPError:
+        raise PortInUse(f"{endpoint} is in use by another program, not an Akshauhini office") from None
+    try:
+        response.raise_for_status()
+        protocol = response.json().get("protocol")
+    except (httpx.HTTPError, ValueError, AttributeError):
+        raise PortInUse(f"{endpoint} is in use by another program, not an Akshauhini office") from None
+    if protocol != "1.0":
+        raise PortInUse(f"{endpoint} is an incompatible Akshauhini version (protocol {protocol})")
+    return True
+
+
+def _loopback_port(endpoint):
+    host_port = endpoint.split("://", 1)[-1].split("/")[0]
+    host, _, port = host_port.rpartition(":")
+    if host not in ("127.0.0.1", "localhost") or not port.isdigit():
+        raise RuntimeError(f"No collector at {endpoint}; only local collectors can be started automatically")
+    return int(port)
+
+
+def locate_office(endpoint=None):
+    """Find the office to use: (endpoint, running).
+
+    When it is not running, endpoint names the port a new office should use, which was free when checked.
+    An explicit endpoint (argument, AKSHAUHINI_ENDPOINT or AKSHAUHINI_PORT) is used as given: if another program holds
+    it, PortInUse is raised. Otherwise the recorded office or port 8765 is reused when an office answers there, and a new
+    office gets 8765, or a free port when another program holds 8765.
+    """
+    chosen = (endpoint or config.explicit_endpoint() or "").rstrip("/")
+    if chosen:
+        busy = "Choose a different port, or leave it unset to use a free one automatically."
+        try:
+            if collector_running(chosen):
+                return chosen, True
+        except PortInUse as exc:
+            raise PortInUse(f"{exc}. {busy}") from None
+        port = _loopback_port(chosen)
+        if not config.port_available(port):
+            raise PortInUse(f"Port {port} is in use by another program. {busy}")
+        return chosen, False
+    record = config.read_record()
+    for port in dict.fromkeys(([record["port"]] if record else []) + [config.DEFAULT_PORT]):
+        candidate = config.loopback_endpoint(port)
+        try:
+            if collector_running(candidate):
+                return candidate, True
+        except PortInUse:
+            continue
+    port = config.DEFAULT_PORT if config.port_available(config.DEFAULT_PORT) else config.free_port()
+    return config.loopback_endpoint(port), False
 
 
 def ensure_collector(endpoint=None, timeout=15, open_browser=False):
@@ -37,15 +89,13 @@ def ensure_collector(endpoint=None, timeout=15, open_browser=False):
 
     The started collector runs as a detached background process: it keeps serving after
     your script exits so you can inspect the run. Stop it with `akshauhini stop`. Only loopback endpoints are
-    auto-started; a remote endpoint must already be running.
+    auto-started; a remote endpoint must already be running. Without an explicit endpoint, port 8765 is preferred
+    and a free port is used when another program holds it.
     """
-    endpoint = (endpoint or default_endpoint()).rstrip("/")
-    if collector_running(endpoint):
+    endpoint, running = locate_office(endpoint)
+    if running:
         return endpoint
-    host_port = endpoint.split("://", 1)[-1].split("/")[0]
-    host, _, port = host_port.rpartition(":")
-    if host not in ("127.0.0.1", "localhost") or not port.isdigit():
-        raise RuntimeError(f"No collector at {endpoint}; only local collectors can be started automatically")
+    port = str(_loopback_port(endpoint))
     log = open(home() / "collector.log", "ab")
     flags = {}
     if sys.platform == "win32":
@@ -54,9 +104,9 @@ def ensure_collector(endpoint=None, timeout=15, open_browser=False):
         flags["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     else:
         flags["start_new_session"] = True
-    process = subprocess.Popen([sys.executable, "-m", "akshauhini", "--port", port, "serve"],
+    # The office records its own address and process ID in office.json (see config.write_record).
+    process = subprocess.Popen([sys.executable, "-m", "akshauhini", "--port", port, "serve", "--background"],
                                stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, **flags)
-    (home() / "collector.pid").write_text(f"{process.pid} {port}", encoding="utf-8")
     deadline = time.time() + timeout
     while time.time() < deadline:
         if process.poll() is not None:
@@ -78,10 +128,12 @@ def init(app_id, app_name=None, *, agents=None, endpoint=None, run_id=None, auto
     >>> office = akshauhini.init("support-bot", "Support Bot")
     Set AKSHAUHINI_AUTOSTART=0 (or autostart=False) to never spawn a collector, e.g. in CI.
     """
+    requested = endpoint
     endpoint = (endpoint or default_endpoint()).rstrip("/")
     if autostart and os.getenv("AKSHAUHINI_AUTOSTART", "1") != "0":
         try:
-            endpoint = ensure_collector(endpoint, open_browser=open_browser)
+            # Pass only what the caller chose, so an unset endpoint can fall back to a free port.
+            endpoint = ensure_collector(requested, open_browser=open_browser)
         except RuntimeError as exc:
             if strict:
                 raise

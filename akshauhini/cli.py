@@ -9,8 +9,9 @@ from uuid import uuid4
 import httpx
 import uvicorn
 from . import __version__
-from .config import DEFAULT_PORT, default_db, home
-from .sdk import Office, collector_running, ensure_collector
+from .config import (DEFAULT_PORT, LOOPBACK, clear_record, default_db, default_endpoint, free_port, home,
+                     loopback_endpoint, port_available, read_record, write_record)
+from .sdk import Office, collector_running, ensure_collector, locate_office
 
 __all__ = ["main", "collector_running"]
 
@@ -49,7 +50,8 @@ def main(argv=None):
             pass
     parser = argparse.ArgumentParser(prog="akshauhini", description="Watch every agentic app on this machine in one live office. "
                                      "Run with no command to open the office.")
-    parser.add_argument("--port", type=int, default=int(os.getenv("AKSHAUHINI_PORT", DEFAULT_PORT)))
+    parser.add_argument("--port", type=int, default=None,
+                        help=f"Office port (default: AKSHAUHINI_PORT, else {DEFAULT_PORT}, or a free port when another program holds {DEFAULT_PORT})")
     parser.add_argument("--version", action="version", version=f"akshauhini {__version__}")
     sub = parser.add_subparsers(dest="action")
     serve = sub.add_parser("serve", help="Run the collector and web office in this terminal")
@@ -58,8 +60,9 @@ def main(argv=None):
     serve.add_argument("--app", default=None, help="Serve only this app_id's runs (a per-project office)")
     serve.add_argument("--open", action="store_true", help="Open the office in your browser")
     serve.add_argument("--no-local-agents", action="store_true", help="Hide the Local agents tab (Claude Code, Codex, Gemini CLI transcripts)")
+    serve.add_argument("--background", action="store_true", help=argparse.SUPPRESS)  # set by ensure_collector
     sub.add_parser("start", help="Start the office in the background (if needed) and open it")
-    sub.add_parser("stop", help="Stop a background office started by `start`, `init()` or `run`")
+    sub.add_parser("stop", help="Stop the running office")
     sub.add_parser("status", help="Show whether the office is running and which apps reported recently")
     sub.add_parser("agents", help="List local agents (Claude Code, Codex, Gemini CLI, local LLM) and their sessions")
     delete = sub.add_parser("delete-run", description="Permanently delete one run's events and questions from an office database")
@@ -72,10 +75,18 @@ def main(argv=None):
     scan.add_argument("source", choices=["ollama"])
     scan.add_argument("--interval", type=float, default=5, help="Seconds between polls")
     args = parser.parse_args(argv)
-    endpoint = f"http://127.0.0.1:{args.port}"
+    # An explicit --port is used as given. Without one, apps and commands find the running office through office.json.
+    requested = loopback_endpoint(args.port) if args.port else None
+
+    def fail(message):
+        print(f"akshauhini: {message}", file=sys.stderr, flush=True)
+        return 2
 
     if args.action is None or args.action == "start":
-        url = ensure_collector(endpoint)
+        try:
+            url = ensure_collector(requested)
+        except RuntimeError as exc:
+            return fail(exc)
         print(f"Akshauhini office: {url}  (stop with: akshauhini stop)")
         webbrowser.open(url)
         return 0
@@ -86,33 +97,80 @@ def main(argv=None):
             os.environ["AKSHAUHINI_APP"] = args.app
         if args.no_local_agents:
             os.environ["AKSHAUHINI_LOCAL_AGENTS"] = "0"
+        explicit = args.port or (int(os.environ["AKSHAUHINI_PORT"]) if os.getenv("AKSHAUHINI_PORT") else None)
+        if explicit:
+            port = explicit
+            if not port_available(port, args.host):
+                return fail(f"port {port} is already in use. Choose a different one with --port, or omit --port to use a free port automatically.")
+        else:
+            try:
+                existing, running = locate_office()
+            except RuntimeError:
+                running = False
+            if running:
+                return fail(f"an Akshauhini office is already running at {existing}. Open it there, or start a second office with --port.")
+            port = DEFAULT_PORT if port_available(DEFAULT_PORT, args.host) else free_port(args.host)
+            if port != DEFAULT_PORT:
+                print(f"Port {DEFAULT_PORT} is in use by another program; using free port {port}.", flush=True)
+        # The machine office (not a per-project --db/--app office) records its address so apps and commands find it.
+        record = read_record()
+        if record and not args.background:
+            try:
+                live = collector_running(loopback_endpoint(record["port"]))
+            except RuntimeError:
+                live = False
+            if not live:
+                record = None
+        claim = args.background or (record is None and not args.db and not args.app)
+        if claim:
+            write_record(port, os.getpid(), args.background)
+        url = loopback_endpoint(port)
         if args.open:
             import threading
-            threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
-        print(f"Akshauhini office on http://{args.host}:{args.port}  ·  database {os.getenv('AKSHAUHINI_DB') or default_db()}", flush=True)
-        uvicorn.run("akshauhini.server:create_app", factory=True, host=args.host, port=args.port, log_level="warning")
+            threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+        shown = url if args.host == LOOPBACK else f"http://{args.host}:{port} (open {url} on this machine)"
+        print(f"Akshauhini office on {shown}  ·  database {os.getenv('AKSHAUHINI_DB') or default_db()}", flush=True)
+        try:
+            uvicorn.run("akshauhini.server:create_app", factory=True, host=args.host, port=port, log_level="warning")
+        finally:
+            if claim:
+                clear_record(os.getpid())
         return 0
     if args.action == "stop":
-        pidfile = home() / "collector.pid"
-        if not pidfile.exists():
-            print("No background office recorded (one started with `akshauhini serve` stops with Ctrl+C).")
+        record = read_record()
+        if not record or (args.port and record["port"] != args.port):
+            print("No running office recorded. An office started with `akshauhini serve` in a terminal also stops with Ctrl+C.")
             return 1
-        pid = int(pidfile.read_text().split()[0])
+        office = loopback_endpoint(record["port"])
+        try:
+            live = collector_running(office)
+        except RuntimeError:
+            live = False
+        if not live:  # never signal a process ID that may since have been reused by another program
+            clear_record()
+            print(f"The recorded office at {office} was not running.")
+            return 1
+        pid = record["pid"]
         try:
             if sys.platform == "win32":
                 subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False)
             else:
                 os.kill(pid, signal.SIGTERM)
-            print(f"Stopped office (pid {pid}).")
         except ProcessLookupError:
-            print("Background office was not running.")
-        pidfile.unlink(missing_ok=True)
+            pass
+        clear_record()
+        print(f"Stopped office at {office} (pid {pid}).")
         return 0
+    endpoint = requested or default_endpoint()
     if args.action == "status":
         try:
-            up = collector_running(endpoint)
+            if not requested:
+                endpoint, up = locate_office()
+            else:
+                up = collector_running(endpoint)
         except RuntimeError as exc:
-            parser.error(str(exc))
+            print(f"Office not running: {exc}")
+            return 1
         if not up:
             print(f"Office not running on {endpoint}. Start it with: akshauhini")
             return 1
@@ -147,8 +205,12 @@ def main(argv=None):
         print(f"Deleted run {args.run_id} ({removed} events).")
         return 0
     if args.action == "scan":
-        if not collector_running(endpoint):
-            parser.error(f"No collector answering at {endpoint}. Start one first: akshauhini")
+        try:
+            endpoint, up = (endpoint, collector_running(endpoint)) if requested else locate_office()
+        except RuntimeError as exc:
+            return fail(exc)
+        if not up:
+            return fail(f"no office answering at {endpoint}. Start one first: akshauhini")
         from .local_agents import scan_ollama
         try:
             scan_ollama(endpoint, interval=args.interval)
@@ -163,8 +225,13 @@ def main(argv=None):
     server = None
     child = None
     try:
-        if not collector_running(endpoint):
-            server = subprocess.Popen([sys.executable, "-m", "akshauhini", "--port", str(args.port), "serve"])
+        endpoint, running = locate_office(requested)
+    except RuntimeError as exc:
+        return fail(exc)
+    try:
+        if not running:
+            port = endpoint.rsplit(":", 1)[1]
+            server = subprocess.Popen([sys.executable, "-m", "akshauhini", "--port", port, "serve"])
             for _ in range(150):
                 if server.poll() is not None:
                     raise RuntimeError("Collector failed to start")

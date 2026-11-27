@@ -275,7 +275,7 @@ function App(){
 
       {/* Sidebar rail */}
       <aside className="rail">
-        <div className="brand-icon" aria-label="Akshauhini">A</div>
+        <div className="brand-icon" aria-label="Akshauhini" lang="hi">अ</div>
         <button title="Apps office (F = fit)" aria-label="Apps office" className={page==='apps'?'rail-active':''}
           onClick={()=>{setPage('apps');setDepartment('All departments');setFollow(undefined);setFitToken(x=>x+1);}}>
           <IconOffice size={20}/>
@@ -299,7 +299,7 @@ function App(){
       <div className="workspace">
         <header className="product-header">
           <div className="product-heading">
-            <div className="product-mark"><span>A</span></div>
+            <div className="product-mark"><span lang="hi">अ</span></div>
             <div>
               <div className="eyebrow">AGENT OPERATIONS CENTER</div>
               <h1>Akshauhini <span>Live orchestration intelligence</span></h1>
