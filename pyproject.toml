@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "akshauhini"
 dynamic = ["version"]
-description = "Live visual monitoring for multi-agent applications, with a read-only view of local coding agents (Claude Code, Codex CLI, Gemini CLI) and offline LLM analysis."
+description = "Live visual monitoring, LLM tracing and LLM evaluation for multi-agent applications: see why agents are stuck, slow, looping or failing, and whether a new version is worse."
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Abhineet Pandey" }]
-keywords = ["agents", "multi-agent", "llm", "local-llm", "observability", "telemetry", "tracing", "opentelemetry", "dashboard", "claude-code", "codex", "ollama"]
+keywords = ["agents", "multi-agent", "llm", "llm-tracing", "llm-evaluation", "llm-observability", "evaluation", "local-llm", "observability", "telemetry", "tracing", "opentelemetry", "dashboard", "claude-code", "codex", "ollama"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Web Environment",

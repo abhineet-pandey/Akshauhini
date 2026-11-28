@@ -11,7 +11,7 @@ import uvicorn
 from . import __version__
 from .config import (DEFAULT_PORT, LOOPBACK, clear_record, default_db, default_endpoint, free_port, home,
                      loopback_endpoint, port_available, read_record, write_record)
-from .sdk import Office, collector_running, ensure_collector, locate_office
+from .sdk import Office, app_version, collector_running, ensure_collector, locate_office
 
 __all__ = ["main", "collector_running"]
 
@@ -39,6 +39,59 @@ def _age(iso):
         if seconds >= size:
             return f"{int(seconds // size)} {unit} ago"
     return f"{int(seconds)}s ago"
+
+
+QUESTIONS = ("stuck", "latency", "loops", "failure", "tokens", "versions")
+
+
+def show_insights(args):
+    """Print answers for a run or a project, read straight from the database (no running office needed)."""
+    import json
+    from .insights import analyze_project, analyze_run
+    from .store import EventStore
+    store = EventStore(args.db or default_db())
+    try:
+        runs = store.runs(limit=1000)
+        if args.app:
+            runs = [r for r in runs if args.app in (r.get("app_id"), r.get("app_name"))]
+            if not runs:
+                print(f"akshauhini: no runs for project {args.app!r}", file=sys.stderr)
+                return 1
+        if args.run:
+            events = store.all_events(args.run)
+            if not events:
+                print(f"akshauhini: no run {args.run!r}", file=sys.stderr)
+                return 1
+        elif not runs:
+            print("No runs recorded yet.")
+            return 1
+        else:
+            events = store.all_events(runs[0]["run_id"])
+        run = analyze_run(events)
+        project = analyze_project(store.all_events(r["run_id"]) for r in reversed(runs[:50])) if args.app else None
+    finally:
+        store.close()
+    if args.json:
+        print(json.dumps({"run": run, "project": project}, indent=2, default=str))
+        return 0
+    s = run["summary"]
+    label = s["app_name"] or s["app_id"] or "run"
+    version = f" · version {s['version']}" if s.get("version") else (f" · commit {s['commit']}" if s.get("commit") else "")
+    print(f"Run {events[0]['run_id']} · {label}{version} · {s['status']} · {s['agents']} agents · {s['events']} events\n")
+    for key in QUESTIONS[:-1]:
+        print(f"{run[key]['question']}\n  {run[key]['answer']}\n")
+    if run["evaluations"]:
+        print("Evaluations")
+        for ev in run["evaluations"]:
+            parts = [f"mean score {ev['mean_score']:g}" if ev["mean_score"] is not None else "",
+                     f"pass rate {ev['pass_rate']:.0%}" if ev["pass_rate"] is not None else ""]
+            print(f"  {ev['name']}: {', '.join(p for p in parts if p)} ({ev['count']} checks)")
+        print()
+    if project:
+        print(f"Project {args.app} · {len(project['runs'])} runs\n")
+        for key in QUESTIONS:
+            print(f"{project[key]['question']}\n  {project[key]['answer']}\n")
+    return 0
 
 
 def main(argv=None):
@@ -71,6 +124,12 @@ def main(argv=None):
     run = sub.add_parser("run", help="Run a command with the office attached (AKSHAUHINI_ENDPOINT/RUN_ID are set for it)")
     run.add_argument("--no-open", action="store_true")
     run.add_argument("command", nargs=argparse.REMAINDER)
+    insights = sub.add_parser("insights", description="Answer operational questions from recorded runs: why an agent is stuck, "
+                              "who causes latency, loops, why a run failed, token use, and whether the latest version is worse.")
+    insights.add_argument("--run", default=None, help="A run ID (default: the latest run, or the latest run of --app)")
+    insights.add_argument("--app", default=None, help="A project: its app_id, or the app name shown in the office")
+    insights.add_argument("--db", default=None, help="SQLite file (default: AKSHAUHINI_DB or ~/.akshauhini/akshauhini.sqlite)")
+    insights.add_argument("--json", action="store_true", help="Print the full analysis as JSON")
     scan = sub.add_parser("scan", description="Watch a local tool's own API and mirror what it reports into the office. Opt-in; run in its own terminal.")
     scan.add_argument("source", choices=["ollama"])
     scan.add_argument("--interval", type=float, default=5, help="Seconds between polls")
@@ -204,6 +263,8 @@ def main(argv=None):
             parser.error(f"No run {args.run_id!r} in that database")
         print(f"Deleted run {args.run_id} ({removed} events).")
         return 0
+    if args.action == "insights":
+        return show_insights(args)
     if args.action == "scan":
         try:
             endpoint, up = (endpoint, collector_running(endpoint)) if requested else locate_office()
@@ -247,7 +308,7 @@ def main(argv=None):
         if not args.no_open:
             webbrowser.open(f"{endpoint}/?run={run_id}")
         with Office(endpoint, run_id) as office:
-            office.emit("run.started", title=" ".join(command))
+            office.emit("run.started", title=" ".join(command), **app_version())
             child = subprocess.Popen(use_own_python(command), env={**os.environ, "AKSHAUHINI_ENDPOINT": endpoint, "AKSHAUHINI_RUN_ID": run_id})
             code = child.wait()
             office.emit("run.completed" if code == 0 else "run.failed", exit_code=code)

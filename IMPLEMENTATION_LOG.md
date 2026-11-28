@@ -220,3 +220,10 @@ Verification: TypeScript and Vite build, UI packaged, Chrome screenshots of the 
 ## 2026-11-26 — Apache License 2.0
 
 - [x] Relicensed to the Apache License 2.0 before the first public release, replacing the short-lived PolyForm Noncommercial choice: free for everyone, including commercial use. `LICENSE` is the verbatim Apache text (so GitHub detects it), `NOTICE` holds the copyright line and points to the third-party notices, and `pyproject.toml` declares `license = "Apache-2.0"` with both files in `license-files`.
+
+## Insights, LLM tracing and LLM evaluation (0.2.0)
+
+- [x] `akshauhini/insights.py` answers, per run and per project, from recorded events only: stuck agents (open LLM/tool calls, reported waiting/blocked, pending human approval, tool queues, silent agents with open work), latency by agent, back-and-forth loops per task, the first failure and what followed, token use and cost by agent and model, and a version-vs-previous-version comparison (success rate, duration, LLM latency, tokens, evaluation scores and pass rates, with regression thresholds and a small-sample warning).
+- [x] Served by `GET /api/insights/runs/{run_id}` and `GET /api/insights/project`, printed by `akshauhini insights`, and shown in the office's Insights panel (key `I`) with the LLM call trace and evaluations.
+- [x] SDK: `init(..., version=)`, `AKSHAUHINI_APP_VERSION`, automatic git commit; `office.llm(...)` traces calls (prompts/responses only when capture is enabled, clipped to 4,000 characters); `office.evaluate(...)` records `eval.recorded`; runs from `init()`/`with Office(app_id=...)` now end with `run.completed`/`run.failed`.
+- [ ] Natural-language questions over Insights with a local model, and alerting when a regression is detected.

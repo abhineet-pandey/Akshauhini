@@ -284,7 +284,8 @@ export function LocalOffice({theme,agentScale,reducedMotion,finishMode,askOpen,o
             ):(
               <>
                 {askOpen&&(
-                  <div className="la-ask-panel">
+                  // Opened from a button below a long session list: bring the panel into view.
+                  <div className="la-ask-panel" ref={el=>{el?.scrollIntoView({block:'nearest',behavior:'smooth'});}}>
                     <div className="gap-header">
                       <span className="panel-title">ASK ABOUT YOUR LOCAL AGENTS</span>
                       <button className="gap-close" onClick={onAskClose} aria-label="Close">×</button>

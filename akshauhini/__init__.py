@@ -8,7 +8,7 @@ Quick start::
     @office.track("researcher", name="Research Agent")
     def research(topic): ...
 """
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 from .sdk import Office, init, ensure_collector
 from .protocol import Event

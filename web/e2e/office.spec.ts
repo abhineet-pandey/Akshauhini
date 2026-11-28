@@ -31,7 +31,7 @@ test('projects panel detects a newly connected app and opens its office',async({
 test('renders the office, selects an agent and deterministically seeks replay',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto('/');await page.getByRole('button',{name:'Close projects'}).click();await page.getByRole('button',{name:'Demo',exact:true}).click();await expect(page.locator('canvas')).toBeVisible();
- await expect(page.getByText('SIMULATED · sample event sequence')).toBeVisible();
+ await expect(page.getByText('Sample telemetry · simulated')).toBeVisible();
  await page.getByRole('button',{name:'Pause',exact:true}).click();
  await page.getByRole('slider',{name:'Replay position'}).fill('20000');
  await page.getByRole('button',{name:/Alex.*Thinking/}).click();
@@ -60,6 +60,29 @@ test('an ended run explains that its app can no longer answer questions',async({
  await expect(page.getByText('This run has ended, so its app is probably no longer running',{exact:false})).toBeVisible();
  await page.getByRole('button',{name:'Ask agent',exact:true}).click();
  await expect(page.getByText('Not collected: this run has ended',{exact:false})).toBeVisible();
+});
+
+test('insights answer the operational questions from recorded events',async({page,request})=>{
+ const run='insights-'+Date.now(),base=Date.now();let n=0;
+ const make=(type:string,agent:string|undefined,extra:object={})=>({event_id:`${run}-${n}`,run_id:run,type,agent_id:agent,timestamp:new Date(base+(n++)*100).toISOString(),...extra});
+ await request.post('/api/events',{data:[
+  make('run.started',undefined,{data:{app_id:'insights-e2e-'+base,app_name:'Insights E2E',version:'2.0'}}),
+  make('agent.created','res',{data:{name:'Researcher'}}),make('agent.created','lead',{data:{name:'Lead'}}),
+  make('llm.completed','res',{operation_id:'c1',data:{model:'m',duration_ms:4000,input_tokens:900,output_tokens:100}}),
+  ...[0,1,2].flatMap(()=>[make('message.sent','lead',{task_id:'t',data:{target_agent_id:'res'}}),make('message.sent','res',{task_id:'t',data:{target_agent_id:'lead'}})]),
+  make('tool.call.failed','res',{operation_id:'c2',data:{tool:'search',error:'HTTP 503'}}),
+  make('eval.recorded','res',{data:{name:'grounded',passed:false,reason:'No citation'}}),
+  make('run.failed',undefined,{data:{exit_code:1}})]});
+ await page.goto('/?run='+run);await showTeam(page);
+ await page.locator('.header-actions').getByRole('button',{name:/Insights/}).click();
+ await expect(page.locator('[data-question=latency] .ins-answer')).toContainText('Researcher accounts for 100%');
+ await expect(page.locator('[data-question=loops] .ins-answer')).toContainText('Lead and Researcher went back and forth 3 times');
+ await expect(page.locator('[data-question=failure] .ins-answer')).toContainText('tool.call.failed by Researcher (search): HTTP 503');
+ await expect(page.locator('[data-question=tokens] .ins-answer')).toContainText('Researcher used the most: 1.0k tokens');
+ await page.getByRole('tab',{name:/Evaluations/}).click();
+ await expect(page.getByText('No citation')).toBeVisible();
+ await page.getByRole('tab',{name:'Project'}).click();
+ await expect(page.locator('[data-question=versions] .ins-answer')).toContainText('Not enough runs to compare yet');
 });
 
 test('dynamic connected agent answers questions and updates blocked progress',async({page,request})=>{

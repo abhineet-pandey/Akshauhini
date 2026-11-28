@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from .protocol import Event
 from .store import EventStore
 from .otel import convert
+from .insights import analyze_project, analyze_run
 from .models import Connection, Question, Answer, Route, Delivery, ModelSettings
 from .questions import Questions
 from .ollama import Ollama
@@ -93,7 +94,8 @@ def create_app(db_path: str | None = None, app_scope: str | None = None):
 
     @app.post("/api/apps/connect")
     def connect(connection: Connection):
-        records = [Event(run_id=connection.run_id,type="run.started",data={"app_id":connection.app_id,"app_name":connection.name})]
+        identity = {"app_id":connection.app_id,"app_name":connection.name,"version":connection.version,"commit":connection.commit}
+        records = [Event(run_id=connection.run_id,type="run.started",data={k:v for k,v in identity.items() if v})]
         records += [Event(run_id=connection.run_id,type="agent.created",agent_id=agent.agent_id,data=agent.model_dump(exclude={"agent_id"},exclude_none=True)) for agent in connection.agents]
         ingest(records)
         return {"run_id":connection.run_id,"app_id":connection.app_id,"agents":len(connection.agents)}
@@ -193,6 +195,32 @@ def create_app(db_path: str | None = None, app_scope: str | None = None):
     @app.get("/api/runs/{run_id}/events")
     def events(run_id: str, after: int = Query(0, ge=0), limit: int = Query(1000, ge=1, le=5000)):
         return app.state.store.events(run_id, after, limit)
+
+    # ── Insights: operational answers computed from the recorded events ──────
+    def project_runs(app_id=None, app_name=None, limit=50):
+        rows = app.state.store.runs(app_id=scope or app_id or None, limit=1000)
+        if not (scope or app_id):
+            rows = [r for r in rows if not r.get("app_id") and r.get("app_name") == app_name]
+        return rows[:limit]
+
+    @app.get("/api/insights/runs/{run_id}")
+    def run_insights(run_id: str):
+        events = app.state.store.all_events(run_id)
+        if not events:
+            raise HTTPException(404, f"No run {run_id!r}")
+        result = analyze_run(events)
+        if scope and result["summary"]["app_id"] != scope:
+            raise HTTPException(404, f"No run {run_id!r} in this office")
+        return result
+
+    @app.get("/api/insights/project")
+    def project_insights(app_id: str | None = None, app_name: str | None = None, runs: int = Query(50, ge=2, le=200)):
+        """Answers across a project's latest runs. A project is an app_id, or for apps run without one, an app name."""
+        if not (scope or app_id or app_name):
+            raise HTTPException(422, "Pass app_id or app_name")
+        rows = project_runs(app_id, app_name, runs)
+        result = analyze_project(app.state.store.all_events(r["run_id"]) for r in reversed(rows))
+        return {"app_id": scope or app_id, "app_name": app_name or (rows[0].get("app_name") if rows else None), **result}
 
     # ── Local agents (Claude Code, Codex, Gemini CLI, Ollama) ─────────────
     # Transcripts are private. They are served only to a browser on this machine: the request must come from loopback

@@ -19,6 +19,9 @@ class Connection(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     run_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=200)
     agents: list[AgentRegistration] = Field(default_factory=list, max_length=200)
+    # Which build of the app produced this run, so runs can be compared release against release.
+    version: str | None = Field(default=None, min_length=1, max_length=100)
+    commit: str | None = Field(default=None, min_length=1, max_length=64)
 
 class ProgressReport(StrictModel):
     state: Literal["idle", "working", "waiting", "blocked", "completed", "failed", "cancelled"]

@@ -112,10 +112,15 @@ def test_sdk_register_and_progress_payload():
     with Office(run_id='r',strict=True) as office:
         office.client.close()
         office.client=httpx.Client(transport=httpx.MockTransport(handler))
-        office.connect('my-app','My App',[{'agent_id':'a','name':'A'}])
+        office.connect('my-app','My App',[{'agent_id':'a','name':'A'}],version='2.1')
         office.progress('a',state='working',summary='One complete',completed_units=1,total_units=4)
     assert sent[0][0]=='/api/apps/connect'
-    assert sent[1][1][0]['data']['progress']==.25
+    # The connect request stays in the original shape every office accepts; the version follows as run.started.
+    assert 'version' not in sent[0][1] and 'commit' not in sent[0][1]
+    events=[e for path,body in sent[1:] for e in body]
+    started=next(e for e in events if e['type']=='run.started')
+    assert started['data']['version']=='2.1' and started['data']['app_id']=='my-app'
+    assert next(e for e in events if e['type']=='agent.progress')['data']['progress']==.25
 
 def test_sdk_track_decorator_preserves_results_and_reports_lifecycle():
     sent=[]

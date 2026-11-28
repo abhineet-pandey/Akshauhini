@@ -122,11 +122,58 @@ def ensure_collector(endpoint=None, timeout=15, open_browser=False):
     return endpoint
 
 
-def init(app_id, app_name=None, *, agents=None, endpoint=None, run_id=None, autostart=True, open_browser=False, strict=False):
+CONTENT_LIMIT = 4000  # characters kept of a captured prompt, response, expected or actual output
+
+
+def _finish_at_exit(office):
+    """Mark an init() run completed when the process exits, or failed with the error if it dies of an exception."""
+    import atexit
+    previous = sys.excepthook
+
+    def hook(exc_type, exc, tb):
+        try:
+            office.finish("failed", error=f"{exc_type.__name__}: {exc}"[:2000])
+        except Exception:
+            pass
+        previous(exc_type, exc, tb)
+
+    def at_exit():
+        with warnings.catch_warnings():  # an unreachable office is not worth a warning while the process shuts down
+            warnings.simplefilter("ignore")
+            office.finish("completed")
+
+    sys.excepthook = hook
+    atexit.register(at_exit)
+
+
+def _clip(text):
+    text = str(text)
+    return text if len(text) <= CONTENT_LIMIT else text[:CONTENT_LIMIT] + f"… [{len(text) - CONTENT_LIMIT} more characters]"
+
+
+def app_version(version=None):
+    """The app's version and commit for this run: explicit values, else AKSHAUHINI_APP_VERSION / AKSHAUHINI_APP_COMMIT,
+    else the current git commit when the app runs inside a git checkout. Missing values are left out."""
+    info = {"version": version or os.getenv("AKSHAUHINI_APP_VERSION") or None, "commit": os.getenv("AKSHAUHINI_APP_COMMIT") or None}
+    if not info["commit"]:
+        try:
+            flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+            out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=2, **flags)
+            if out.returncode == 0 and out.stdout.strip():
+                info["commit"] = out.stdout.strip()[:64]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return {k: v for k, v in info.items() if v}
+
+
+def init(app_id, app_name=None, *, agents=None, endpoint=None, run_id=None, autostart=True, open_browser=False, strict=False,
+         version=None, capture_content=None):
     """One-line setup for any agentic app: make sure the local office is up, register the app, return an Office.
 
-    >>> office = akshauhini.init("support-bot", "Support Bot")
+    >>> office = akshauhini.init("support-bot", "Support Bot", version="1.4.0")
     Set AKSHAUHINI_AUTOSTART=0 (or autostart=False) to never spawn a collector, e.g. in CI.
+    version tags this run so releases can be compared (default AKSHAUHINI_APP_VERSION; the git commit is added when found).
+    capture_content=True records LLM prompts and responses passed to office.llm() (default AKSHAUHINI_CAPTURE_CONTENT=1).
     """
     requested = endpoint
     endpoint = (endpoint or default_endpoint()).rstrip("/")
@@ -138,21 +185,41 @@ def init(app_id, app_name=None, *, agents=None, endpoint=None, run_id=None, auto
             if strict:
                 raise
             warnings.warn(f"Akshauhini office not started: {exc}", RuntimeWarning, stacklevel=2)
-    office = Office(endpoint, run_id, strict=strict, app_id=app_id, app_name=app_name or app_id, agents=agents)
+    office = Office(endpoint, run_id, strict=strict, app_id=app_id, app_name=app_name or app_id, agents=agents,
+                    version=version, capture_content=capture_content)
+    _finish_at_exit(office)
     print(f"Akshauhini: watching '{app_name or app_id}' at {endpoint}/?run={office.run_id}", file=sys.stderr, flush=True)
     return office
 
 class Office:
     """Explicit, framework-independent telemetry; failures do not break agent work."""
-    def __init__(self, endpoint=None, run_id=None, strict=False, app_id=None, app_name=None, agents=None):
+    def __init__(self, endpoint=None, run_id=None, strict=False, app_id=None, app_name=None, agents=None, version=None,
+                 capture_content=None):
         self.endpoint = (endpoint or default_endpoint()).rstrip("/")
         self.run_id = run_id or os.getenv("AKSHAUHINI_RUN_ID") or str(uuid4())
         self.strict = strict
+        # Prompts and responses can hold private data: they are recorded only when explicitly enabled.
+        self.capture_content = os.getenv("AKSHAUHINI_CAPTURE_CONTENT") == "1" if capture_content is None else bool(capture_content)
         self.client = httpx.Client(timeout=3, trust_env=False)
         self._resources = {}
         self._resource_lock = Lock()
+        # An Office that registered an app owns its run, so it also records how the run ended (see finish()).
+        self._owns_run = bool(app_id)
+        self._finished = False
         if app_id:
-            self.connect(app_id, app_name or app_id, agents)
+            self.connect(app_id, app_name or app_id, agents, version=version)
+
+    def finish(self, status="completed", **data):
+        """Record that this run ended: run.completed, or run.failed (pass error=...). Only the first call counts.
+
+        Called automatically when a `with Office(app_id=...)` block or an init() process ends.
+        """
+        if self._finished or not self._owns_run:
+            return None
+        self._finished = True
+        if self.client.is_closed:
+            self.client = httpx.Client(timeout=3, trust_env=False)
+        return self.emit("run.failed" if status == "failed" else "run.completed", **data)
 
     def emit(self, event_type, agent_id=None, task_id=None, operation_id=None, **data):
         event = Event(run_id=self.run_id, type=event_type, agent_id=agent_id, task_id=task_id, operation_id=operation_id, data=data)
@@ -203,18 +270,25 @@ class Office:
             return tracked
         return decorate
 
-    def connect(self, app_id, name, agents=None):
-        """Register the actual app's agent roster; more agents can arrive later."""
+    def connect(self, app_id, name, agents=None, version=None):
+        """Register the actual app's agent roster and version; more agents can arrive later."""
         connection = Connection(app_id=app_id,name=name,run_id=self.run_id,agents=agents or [])
         try:
-            response = self.client.post(f"{self.endpoint}/api/apps/connect",json=connection.model_dump(mode="json"))
+            response = self.client.post(f"{self.endpoint}/api/apps/connect",json=connection.model_dump(mode="json",exclude_none=True))
             response.raise_for_status()
-            return response.json()
+            result = response.json()
         except httpx.HTTPError as exc:
             if self.strict:
                 raise
             warnings.warn(f"Akshauhini connection unavailable: {exc}",RuntimeWarning,stacklevel=2)
             return None
+        # The version travels on its own run.started event rather than in the connect request: an office from before
+        # versions existed rejects unknown connect fields, but stores any run.started data, and runs merge identity
+        # from every run.started they receive.
+        info = app_version(version)
+        if info:
+            self.emit("run.started", app_id=app_id, app_name=name, **info)
+        return result
 
     def progress(self, agent_id, *, state, summary, task_id=None, completed_items=None,
                  waiting_for=None, next_steps=None, completed_units=None, total_units=None):
@@ -264,11 +338,68 @@ class Office:
         else:
             self.emit(f"{kind}.completed", agent_id, task_id, operation_id, **{**data, **metrics, "duration_ms": (time.perf_counter() - start) * 1000})
 
+    @contextmanager
+    def llm(self, agent_id, model=None, *, task_id=None, prompt=None, capture=None):
+        """Trace one LLM call: its time, tokens, cost and errors, and (only when enabled) its prompt and response.
+
+        >>> with office.llm("researcher", "gpt-4o-mini", prompt=messages) as call:
+        ...     reply = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
+        ...     call.update(response=reply.choices[0].message.content,
+        ...                 input_tokens=reply.usage.prompt_tokens, output_tokens=reply.usage.completion_tokens)
+
+        Set any of: response, input_tokens, output_tokens, cache_read_tokens, cost_usd, model. Prompt and response are
+        kept only with capture=True, Office(capture_content=True) or AKSHAUHINI_CAPTURE_CONTENT=1, and are clipped to
+        CONTENT_LIMIT characters. An exception inside the block is recorded as llm.failed and re-raised.
+        """
+        capture = self.capture_content if capture is None else capture
+        operation_id = str(uuid4())
+        base = {"model": model} if model else {}
+        self.emit("llm.started", agent_id, task_id, operation_id, **base, **({"prompt": _clip(prompt)} if capture and prompt is not None else {}))
+        call = {}
+        start = time.perf_counter()
+
+        def finish(phase, extra):
+            data = {**base, **{k: v for k, v in call.items() if k not in ("prompt", "response")}, **extra,
+                    "duration_ms": (time.perf_counter() - start) * 1000}
+            if capture and call.get("response") is not None:
+                data["response"] = _clip(call["response"])
+            self.emit(f"llm.{phase}", agent_id, task_id, operation_id, **data)
+
+        try:
+            yield call
+        except BaseException as exc:
+            finish("failed", {"error": str(exc)})
+            raise
+        else:
+            finish("completed", {})
+
+    def evaluate(self, name, *, score=None, passed=None, threshold=None, agent_id=None, task_id=None, expected=None,
+                 actual=None, reason=None, evaluator=None, **data):
+        """Record a quality check on an output, so runs and versions can be compared on quality, not only speed.
+
+        >>> office.evaluate("answer_correct", passed=answer == expected, agent_id="writer")
+        >>> office.evaluate("relevance", score=0.82, threshold=0.7, evaluator="llm_judge", reason="Cites both sources")
+
+        Give a score, a pass/fail result, or both; with a score and a threshold, passed is score >= threshold.
+        expected and actual are clipped to CONTENT_LIMIT characters.
+        """
+        if passed is None and score is not None and threshold is not None:
+            passed = score >= threshold
+        fields = {"name": name, "score": score, "passed": passed, "threshold": threshold, "reason": reason, "evaluator": evaluator,
+                  "expected": _clip(expected) if expected is not None else None, "actual": _clip(actual) if actual is not None else None}
+        return self.emit("eval.recorded", agent_id, task_id, **{k: v for k, v in fields.items() if v is not None}, **data)
+
     def close(self):
         self.client.close()
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
-        self.close()
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if exc_type is not None and not issubclass(exc_type, (KeyboardInterrupt, GeneratorExit)):
+                self.finish("failed", error=f"{exc_type.__name__}: {exc}"[:2000])
+            else:
+                self.finish("completed")
+        finally:
+            self.close()

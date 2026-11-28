@@ -84,8 +84,13 @@ const INSTALL_COMMAND='pip install akshauhini';
 
 const SAMPLES:{name:string;summary:string;steps:{label:string;text:string}[];link?:{href:string;text:string}}[]=[
   {
+    name:'Insights demo',
+    summary:'A support team recorded at version 1.0 and a deliberately worse 1.1: LLM calls, evaluations, a loop and a failure. Open it and press I. Run it from a clone of the repository.',
+    steps:[{label:'Run',text:'python examples/insights_demo.py'}],
+  },
+  {
     name:'Connected example app',
-    summary:'A small app that registers agents, reports work and answers progress questions. Run it from the repository root.',
+    summary:'A small app that registers agents, reports work and answers progress questions. Run it from a clone of the repository.',
     steps:[{label:'Run',text:'akshauhini run python examples/connected_app.py --directory . --seconds 90'}],
   },
   {
@@ -194,7 +199,7 @@ export function Projects({runs,runsLoaded,current,tab,onTab,onOpen,onClose}:{
                     <span className="pulse-dot"/>
                     <strong>Waiting for your app</strong>
                     <span>This updates by itself when the first event arrives. Apps that use HTTP instead of Python are listed in the connection guide.</span>
-                    <a href="/api/connection-guide" target="_blank" rel="noreferrer">HTTP and other languages ↗</a>
+                    <a href="/api/connection-guide" target="_blank" rel="noreferrer">HTTP and other languages · connection guide (text) ↗</a>
                   </>}
             </div>
           </div>

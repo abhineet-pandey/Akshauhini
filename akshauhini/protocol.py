@@ -13,6 +13,7 @@ EventType = Literal[
     "message.sent", "handoff.started", "handoff.completed", "review.started",
     "review.approved", "review.rejected", "human.requested", "human.approved",
     "human.rejected", "artifact.created", "agent.updated", "agent.removed", "agent.progress", "question.asked", "question.received", "question.routed", "question.answered", "question.cancelled", "resource.updated", "tool.dequeued",
+    "eval.recorded",
 ]
 
 # Producer-defined extension events, e.g. "x.langgraph.node_entered". They are stored, replayed and listed in the
@@ -35,8 +36,19 @@ class Event(BaseModel):
     def validate_semantics(self):
         if self.timestamp.tzinfo is None:
             raise ValueError("timestamp must include timezone")
-        if not self.type.startswith("run.") and not self.agent_id:
+        if not self.type.startswith(("run.", "eval.")) and not self.agent_id:
             raise ValueError("agent_id is required for non-run events")
+        if self.type == "eval.recorded":
+            # A quality check on an output: a named evaluation with a score, a pass/fail result, or both.
+            name, score, passed = self.data.get("name"), self.data.get("score"), self.data.get("passed")
+            if not isinstance(name, str) or not name.strip() or len(name) > 200:
+                raise ValueError("eval.recorded needs data.name (1–200 characters)")
+            if score is not None and (isinstance(score, bool) or not isinstance(score, (int, float))):
+                raise ValueError("eval.recorded data.score must be a number")
+            if passed is not None and not isinstance(passed, bool):
+                raise ValueError("eval.recorded data.passed must be true or false")
+            if score is None and passed is None:
+                raise ValueError("eval.recorded needs data.score, data.passed, or both")
         if self.type.startswith("task.") and not self.task_id:
             raise ValueError("task events require task_id")
         if self.type == "task.progress":

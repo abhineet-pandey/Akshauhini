@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, ConfigDict
 import uvicorn
 import httpx
+from akshauhini.config import default_endpoint
 from .workflow import WorkSession, ROOT
 
 class Request(BaseModel):
@@ -40,7 +41,7 @@ def create_app(endpoint=None, output_dir=None):
         with lock:
             if len(sessions)>=20:raise HTTPException(409,'Demo session limit reached. Restart the demo to clear in-memory sessions; saved outputs remain.')
             try:
-                collector=endpoint or os.getenv('AKSHAUHINI_ENDPOINT','http://127.0.0.1:8765')
+                collector=endpoint or default_endpoint()
                 settings={}
                 if body.use_saved_models:
                     with httpx.Client(timeout=5,trust_env=False) as client:
@@ -71,7 +72,8 @@ def main():
     import argparse
     parser=argparse.ArgumentParser(description='Request-driven multi-agent demo for Akshauhini')
     parser.add_argument('--port',type=int,default=8766)
-    parser.add_argument('--collector',default='http://127.0.0.1:8765')
+    # Default: AKSHAUHINI_ENDPOINT, else the running office (found even on a fallback port), else 127.0.0.1:8765.
+    parser.add_argument('--collector',default=None,help='Akshauhini office URL (default: the running office)')
     parser.add_argument('--output-dir',default=str(ROOT/'outputs'))
     args=parser.parse_args()
     print(f'Request Studio: http://127.0.0.1:{args.port}',flush=True)

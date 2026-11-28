@@ -17,7 +17,8 @@ import {fillViewport} from './layout';
 import {CollapseTeam,TeamRail,useTeamCollapsed} from './teamRail';
 import {usageTitle} from './usage';
 import {Toasts,toastAPI} from './Toasts';
-import {IconOffice,IconSettings,IconChat,IconTerminal,IconFolder,IconPlay,IconPause,IconFit,IconRestart,IconChevronLeft,IconChevronRight,IconCrosshair,IconAgents} from './Icons';
+import {IconOffice,IconSettings,IconChat,IconTerminal,IconFolder,IconPlay,IconPause,IconFit,IconRestart,IconChevronLeft,IconChevronRight,IconCrosshair,IconAgents,IconInsights} from './Icons';
+import {InsightsPanel} from './Insights';
 import {Theme,isFlatTheme,loadTheme,saveTheme,applyTheme,loadAgentScale,saveAgentScale,loadFinishMode,saveFinishMode,FinishMode} from './theme';
 
 type Mode='demo'|'live'|'replay';
@@ -43,6 +44,7 @@ function App(){
   const [mode,setMode]         =useState<Mode>('live');
   const [page,setPageState]    =useState<Page>(params.get('tab')==='local'?'local':'apps');
   const [localEnabled,setLocalEnabled]=useState(true);
+  const [version,setVersion]=useState<string>();
   const setPage=(p:Page)=>{setPageState(p);const u=new URL(location.href);if(p==='local')u.searchParams.set('tab','local');else u.searchParams.delete('tab');history.replaceState(null,'',u);};
   const [run,setRun]           =useState(initialRun);
   const [runs,setRuns]         =useState<Run[]>([]);
@@ -64,6 +66,7 @@ function App(){
   const [projectsTab,setProjectsTab]=useState<ProjectsTab>('projects');
   const [runsLoaded,setRunsLoaded]=useState(false);
   const [showAsk,setShowAsk]   =useState(false);
+  const [showInsights,setShowInsights]=useState(false);
   const [reducedMotion,setReducedMotion]=useState(matchMedia('(prefers-reduced-motion: reduce)').matches);
   engine.reducedMotion=reducedMotion;
   const [theme,setThemeState]=useState<Theme>(loadTheme);
@@ -87,12 +90,19 @@ function App(){
 
   // ── Project scope from the collector, unless the URL chose one ──────────
   useEffect(()=>{
-    if(scopeReady)return;
-    request<{app_id:string|null;local_agents?:boolean}>('/api/config')
-      .then(c=>{setLocalEnabled(c.local_agents!==false);if(c.app_id){setScope(c.app_id);setShowProjects(false);}})
+    const fromUrl=!!params.get('app');
+    request<{app_id:string|null;local_agents?:boolean;version?:string}>('/api/config')
+      .then(c=>{setLocalEnabled(c.local_agents!==false);setVersion(c.version);if(c.app_id&&!fromUrl){setScope(c.app_id);setShowProjects(false);}})
       .catch(()=>{})
       .finally(()=>setScopeReady(true));
-  },[scopeReady]);
+  },[]);
+
+  // ── Keep the open run in the address bar, so reloading or sharing the link returns to it ──
+  useEffect(()=>{
+    const u=new URL(location.href);
+    if(run)u.searchParams.set('run',run);else u.searchParams.delete('run');
+    if(u.href!==location.href)history.replaceState(null,'',u);
+  },[run]);
 
   // ── Run list polling ────────────────────────────────────────────────────
   useEffect(()=>{
@@ -196,7 +206,8 @@ function App(){
       if(e.key!=='Escape'&&(e.target instanceof HTMLInputElement||e.target instanceof HTMLTextAreaElement||e.target instanceof HTMLSelectElement))return;
       switch(e.key){
         case '?': e.preventDefault();setShowAsk(v=>!v);break;
-        case 'Escape':setSelected(undefined);setShowAsk(false);setShowProjects(false);setShowSettings(false);setExpanded(false);setFullOffice(false);break;
+        case 'i':case 'I':if(page==='apps')setShowInsights(v=>!v);break;
+        case 'Escape':setSelected(undefined);setShowAsk(false);setShowInsights(false);setShowProjects(false);setShowSettings(false);setExpanded(false);setFullOffice(false);break;
         case 'f':case 'F':setFitToken(x=>x+1);break;
         case 't':case 'T':setTechnical(x=>!x);break;
         case ' ':
@@ -207,7 +218,7 @@ function App(){
     };
     window.addEventListener('keydown',h);
     return()=>window.removeEventListener('keydown',h);
-  },[mode,playing,position,duration]);
+  },[mode,playing,position,duration,page]);
 
   const seek=(value:number)=>{
     engine.replay(events,value);
@@ -273,6 +284,17 @@ function App(){
         />
       )}
 
+      {showInsights&&page==='apps'&&(
+        <InsightsPanel
+          run={mode==='demo'?undefined:run}
+          project={currentRun&&(currentRun.app_id||currentRun.app_name)?{app_id:currentRun.app_id,app_name:currentRun.app_name}:undefined}
+          projectName={currentName}
+          live={mode==='live'}
+          onClose={()=>setShowInsights(false)}
+          onAgent={id=>{setSelected(id);setFollow(id);setShowInsights(false);}}
+        />
+      )}
+
       {/* Sidebar rail */}
       <aside className="rail">
         <div className="brand-icon" aria-label="Akshauhini" lang="hi">अ</div>
@@ -290,10 +312,13 @@ function App(){
         <button title="Ask agents (? key)" aria-label="Ask agents" onClick={()=>setShowAsk(v=>!v)}>
           <IconChat size={20}/>
         </button>
-        <button title="Technical mode (T key)" aria-label="Technical mode" className={technical?'rail-active':''} onClick={()=>setTechnical(x=>!x)}>
+        <button title="Insights (I key)" aria-label="Insights" className={showInsights&&page==='apps'?'rail-active':''} onClick={()=>{if(page!=='apps'){setPage('apps');setShowInsights(true);}else setShowInsights(v=>!v);}}>
+          <IconInsights size={20}/>
+        </button>
+        <button title="Technical mode (T key)" aria-label="Technical mode" className={technical&&page==='apps'?'rail-active':''} onClick={()=>{if(page!=='apps'){setPage('apps');setTechnical(true);}else setTechnical(x=>!x);}}>
           <IconTerminal size={20}/>
         </button>
-        <div className="rail-bottom">AK<br/><small>v0.1</small></div>
+        <div className="rail-bottom">AK<br/><small>{version?`v${version}`:''}</small></div>
       </aside>
 
       <div className="workspace">
@@ -318,6 +343,9 @@ function App(){
             </span>
             <button title="Ask any agent (? key)" onClick={()=>setShowAsk(v=>!v)}>
               <IconChat size={14}/> Ask agents
+            </button>
+            <button title="Why is an agent stuck, who is slow, loops, failures, tokens, version regressions (I key)" onClick={()=>setShowInsights(v=>!v)}>
+              <IconInsights size={14}/> Insights
             </button>
             <button className={technical?'active':''} onClick={()=>setTechnical(x=>!x)}>Technical mode</button>
           </div>}
@@ -360,7 +388,7 @@ function App(){
           )}
           <div className="toolbar-spacer"/>
           <div className="kb-hints">
-            <kbd>?</kbd> ask&nbsp; <kbd>F</kbd> fit&nbsp; <kbd>T</kbd> technical&nbsp;
+            <kbd>?</kbd> ask&nbsp; <kbd>I</kbd> insights&nbsp; <kbd>F</kbd> fit&nbsp; <kbd>T</kbd> technical&nbsp;
             {mode!=='live'&&<><kbd>Space</kbd> play</>}
           </div>
           <span className="mode-note">
@@ -431,7 +459,7 @@ function App(){
                 <i className="dot waiting"/> {agents.filter(x=>/Waiting|Blocked|Awaiting|Queued/.test(x.status)).length} waiting
               </span>
               <span>
-                {follow?'Following '+follow+' · ':''}
+                {follow?'Following '+(follow.startsWith('task:')?`task ${state.tasks[follow.slice(5)]?.title??follow.slice(5)}`:state.agents[follow]?.name??follow)+' · ':''}
                 Drag to pan · Scroll to zoom · Select a character · <kbd>?</kbd> to ask
               </span>
             </div>
@@ -499,8 +527,8 @@ function App(){
                   <dt>MODEL</dt><dd>{a.model??'Not reported'}</dd>
                   <dt>TIME IN CURRENT STATE</dt><dd>{elapsed.toFixed(1)} sec</dd>
                   <dt>TOOL</dt><dd>{a.tool??'—'}</dd>
-                  <dt>TOKENS · INPUT → OUTPUT</dt><dd>{String(a.metrics.input_tokens??'—')} → {String(a.metrics.output_tokens??'—')}</dd>
-                  {a.metrics.duration_ms!==undefined&&<><dt>REPORTED OPERATION DURATION</dt><dd>{String(a.metrics.duration_ms)} ms</dd></>}
+                  <dt>TOKENS · INPUT → OUTPUT (RUN TOTAL)</dt><dd>{a.tokens&&(a.tokens.input||a.tokens.output)?`${a.tokens.input.toLocaleString()} → ${a.tokens.output.toLocaleString()}`:'Not reported'}</dd>
+                  {typeof a.metrics.duration_ms==='number'&&<><dt>LAST OPERATION DURATION</dt><dd>{a.metrics.duration_ms>=1000?`${(a.metrics.duration_ms/1000).toFixed(2)} s`:`${Math.round(a.metrics.duration_ms)} ms`}</dd></>}
                   {a.error&&<><dt>ERROR</dt><dd className="error">{a.error}</dd></>}
                 </dl>
 

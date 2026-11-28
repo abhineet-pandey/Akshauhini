@@ -83,7 +83,7 @@ export function LocalAgents({initial}:{initial?:{agent:string;session:string}}={
     setSessionId(initial?.agent===agentId?initial.session:undefined);
     const agent=agents.find(a=>a.id===agentId);
     if(agent&&!agent.readable)return;
-    const load=()=>get<Summary[]>(`/api/local-agents/${agentId}/sessions?limit=100`)
+    const load=()=>get<Summary[]>(`/api/local-agents/${encodeURIComponent(agentId)}/sessions?limit=100`)
       .then(s=>{if(!live)return;setSessions(s);setSessionId(cur=>cur??s[0]?.id);}).catch(e=>live&&setError(String(e).replace(/^Error: /,'')));
     load();const t=setInterval(load,5000);
     return()=>{live=false;clearInterval(t);};
@@ -94,7 +94,7 @@ export function LocalAgents({initial}:{initial?:{agent:string;session:string}}={
   useEffect(()=>{
     if(!agentId||!sessionId)return;
     let live=true;
-    get<Detail>(`/api/local-agents/${agentId}/sessions/${encodeURIComponent(sessionId)}`)
+    get<Detail>(`/api/local-agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}`)
       .then(d=>live&&setDetail(d)).catch(e=>live&&setError(String(e).replace(/^Error: /,'')));
     return()=>{live=false;};
   },[agentId,sessionId,current?.modified]);

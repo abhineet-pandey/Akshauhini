@@ -2,6 +2,8 @@
 
 Akshauhini is a live visual monitoring tool for multi-agent applications. It renders your agents as characters in an animated office, where each movement reflects a real telemetry event: agents walk to tool stations, carry tasks, wait on dependencies, hand off work and react to errors.
 
+Behind the animation, **Insights** answers the questions you actually debug with: why an agent is stuck, which agent is responsible for most of the latency, whether two agents keep calling each other, why a workflow failed, which agent consumed the most tokens, and whether the latest version performs worse than the previous one. Each answer comes with the events it is based on, backed by built-in LLM tracing and LLM evaluation.
+
 It also provides a read-only view of the coding agents already installed on your machine (Claude Code, Codex CLI and Gemini CLI), built from the transcripts they save locally, with optional questions answered by a local offline LLM.
 
 ![Akshauhini office view](https://raw.githubusercontent.com/abhineet-pandey/Akshauhini/main/docs/office-preview.png)
@@ -12,6 +14,7 @@ It also provides a read-only view of the coding agents already installed on your
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Usage](#usage)
+- [Insights](#insights)
 - [Command-line reference](#command-line-reference)
 - [Connecting an application](#connecting-an-application)
 - [HTTP API](#http-api)
@@ -31,6 +34,9 @@ It also provides a read-only view of the coding agents already installed on your
 - **Simple integration.** A single decorator instruments a Python agent function; any other language can post JSON events over HTTP or send OpenTelemetry spans.
 - **Live and replay modes.** Follow a run as it happens, or replay stored events at 0.5×, 1×, 2× or 5× speed.
 - **Agent inspector.** Inspect each agent's task queue, model, reported token usage, errors and operation durations.
+- **Insights.** Answers the operational questions for every run and project, with the events that back each answer: why an agent is stuck, which agent causes most of the latency, whether two agents keep calling each other, why a workflow failed, which agent used the most tokens, and whether the latest version performs worse than the previous one.
+- **LLM tracing.** Every LLM call with its model, latency, tokens, cost and errors, per agent and task; prompts and responses only when you opt in.
+- **LLM evaluation.** Record quality checks (`office.evaluate`) and compare pass rates and scores between versions of your app.
 - **Local agent transparency.** Review what Claude Code, Codex CLI and Gemini CLI did on this machine: timelines, files read and written, shell commands and external targets.
 - **Offline analysis.** Ask questions about recorded activity using a local model served by Ollama.
 - **Local by default.** The server binds to `127.0.0.1` and stores data in SQLite.
@@ -159,6 +165,23 @@ akshauhini status   # Show whether the office is running and which applications 
 akshauhini stop     # Stop the running office
 ```
 
+## Insights
+
+Press **I** or click **Insights** in the office to see answers for the open run and its project. Each answer is computed from the events your app recorded and names the agents, events and numbers it is based on; when the data needed for an answer was not reported, it says what to add.
+
+| Question | How it is answered |
+| --- | --- |
+| Why is my agent stuck? | LLM or tool calls that started but never finished, reported `waiting`/`blocked` states, pending human approvals, tool queues, and agents with open work that have gone silent |
+| Which agent is responsible for most of the latency? | Measured LLM and tool time per agent, its share of the total, and its slowest call |
+| Are two agents repeatedly calling each other? | Back-and-forth messages, hand-offs, assignments and routed questions between the same two agents on the same task |
+| Why did this workflow fail? | The first failure in the run, its error, retries, the failures that followed, and the exit code; across a project, the most common first failure |
+| Which agent consumed the most tokens? | Input, output and cached tokens and reported cost per agent and model |
+| Is the latest version performing worse than the previous version? | Success rate, run duration, LLM latency, tokens and evaluation scores of the latest version against the previous one, with regression thresholds and a small-sample warning |
+
+The **LLM calls** tab traces every call in the run, and **Evaluations** lists quality checks and their failures. The same answers are available from the terminal (`akshauhini insights`) and the HTTP API (`/api/insights/...`).
+
+Version comparison needs to know which version produced each run: pass `version=` to `akshauhini.init()` or set `AKSHAUHINI_APP_VERSION`; the git commit is recorded automatically when the app runs in a git checkout. Without versions, the latest runs are compared with the ones before them.
+
 ## Command-line reference
 
 ### Synopsis
@@ -186,8 +209,9 @@ Global options must be placed before the command, for example `akshauhini --port
 | [`start`](#start) | Start the office in the background if needed, and open it in the browser |
 | [`serve`](#serve) | Run the office in the foreground of the current terminal |
 | [`status`](#status) | Show whether the office is running and which applications have reported |
-| [`stop`](#stop) | Stop the background office |
+| [`stop`](#stop) | Stop the running office |
 | [`run`](#run) | Run a program with the office attached |
+| [`insights`](#insights-1) | Answer operational questions about a run or project |
 | [`agents`](#agents) | List local agents and their recent sessions |
 | [`delete-run`](#delete-run) | Permanently delete a stored run |
 | [`scan`](#scan) | Mirror activity reported by a local tool into the office |
@@ -246,6 +270,21 @@ Runs `COMMAND` with the office attached. If no office is running, one is started
 
 `run` does not inspect arbitrary Python code or patch frameworks such as LangGraph, CrewAI or AutoGen. Agent-level activity is recorded only through SDK calls, HTTP events or OpenTelemetry spans.
 
+#### insights
+
+```
+akshauhini insights [--run RUN_ID] [--app APP] [--db PATH] [--json]
+```
+
+Prints the [Insights](#insights) answers for a run (default: the latest run) and, with `--app`, for that project, including the version comparison. It reads the database directly, so the office does not need to be running.
+
+| Option | Description |
+| --- | --- |
+| `--run RUN_ID` | The run to analyse (default: the latest run, or the latest run of `--app`) |
+| `--app APP` | A project: its `app_id`, or the app name shown in the office |
+| `--db PATH` | SQLite database to read (default: `AKSHAUHINI_DB`, or `~/.akshauhini/akshauhini.sqlite`) |
+| `--json` | Print the full analysis as JSON |
+
 #### agents
 
 ```
@@ -289,6 +328,9 @@ akshauhini serve --db ./office.sqlite --app my-app-id --open
 
 # Run a script without opening the browser
 akshauhini run --no-open python your_app.py
+
+# Why did the latest run of a project fail, and is the new version worse?
+akshauhini insights --app my-app-id
 
 # Delete a run from the default database
 akshauhini stop
@@ -341,13 +383,34 @@ with Office() as office:
 
 `Office.operation` records a correlation ID, the elapsed time in milliseconds and any failure, then re-raises application exceptions. Connection failures to the collector produce warnings by default; pass `Office(strict=True)` to raise instead.
 
+### LLM tracing, evaluations and versions
+
+```python
+import akshauhini
+
+office = akshauhini.init("support-bot", "Support Bot", version="1.4.0")
+
+with office.llm("researcher", "gpt-4o-mini", prompt=messages) as call:
+    reply = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
+    call.update(response=reply.choices[0].message.content,
+                input_tokens=reply.usage.prompt_tokens, output_tokens=reply.usage.completion_tokens)
+
+office.evaluate("answer_grounded", passed=cites_sources(reply), agent_id="writer")
+office.evaluate("relevance", score=0.82, threshold=0.7, evaluator="llm_judge")
+```
+
+- `office.llm(...)` records the call's duration, tokens, cost (`cost_usd`) and any exception as `llm.started`/`llm.completed`/`llm.failed`. **Prompts and responses are not recorded** unless you pass `capture_content=True` to `init()`/`Office()` or `capture=True` to the call, or set `AKSHAUHINI_CAPTURE_CONTENT=1`; recorded content is clipped to 4,000 characters.
+- `office.evaluate(name, score=..., passed=..., threshold=...)` records an `eval.recorded` quality check. Give a score, a pass/fail result or both; with a score and a threshold, it passes when `score >= threshold`.
+- `version=` (or `AKSHAUHINI_APP_VERSION`) tags the run so Insights can compare versions. The current git commit is added automatically when available, or set `AKSHAUHINI_APP_COMMIT`.
+- A run started with `akshauhini.init()` or `with Office(app_id=...)` is marked completed when the program or block ends, or failed with the error if it raises. Call `office.finish("failed", error=...)` to record it yourself.
+
 ### Dynamic agents and questions
 
 - Register the application with `Office(app_id="my-app", app_name="My App")` and its agents with `office.agent(...)`. Each run has its own roster; agents can join, update their metadata and leave at any time.
 - Use `with office.answer_questions({agent_id: callback}): ...` to answer questions sent from the inspector. Each question is delivered to the matching agent's callback, and structured replies update its displayed progress.
 - Optional summaries from a local LLM (Ollama) explain recorded telemetry without changing runtime state. No model is selected unless configured, and no fallback provider is used.
 
-> **Note:** Events are stored exactly as supplied, without redaction. Do not include secrets or prompt contents in event data.
+> **Note:** Events are stored exactly as supplied, without redaction. Do not include secrets in event data, and enable prompt and response capture only where storing them locally is acceptable.
 
 ## HTTP API
 
@@ -367,6 +430,8 @@ Applications in any language can send events by posting a JSON array of 1 to 100
 }]
 ```
 
+Quality checks are `eval.recorded` events with `data.name` and a `data.score`, a `data.passed`, or both; `agent_id` is optional for them. Report a run's version with `data.version` on `run.started` (or `version` in `POST /api/apps/connect`).
+
 Use the same `operation_id` for the matching completion or failure event. Submitting an identical event twice has no effect; reusing an `event_id` with different contents returns `409 Conflict` and rolls back the whole batch. Producers should keep timestamps and IDs stable when retrying.
 
 | Endpoint | Description |
@@ -377,6 +442,8 @@ Use the same `operation_id` for the matching completion or failure event. Submit
 | `GET /api/runs/{run_id}/events?after=0&limit=1000` | Cursor-paginated events (maximum `limit` 5000) |
 | `WS /api/live/{run_id}?after=0` | Catch-up from storage followed by live batches (150 ms polling) |
 | `POST /v1/traces` | OTLP/HTTP JSON span input |
+| `GET /api/insights/runs/{run_id}` | Insights for one run: stuck agents, latency, loops, failure, tokens, LLM calls and evaluations |
+| `GET /api/insights/project?app_id=...` | Insights across a project's latest runs (or `?app_name=...` for apps without an `app_id`), including the version comparison |
 | `GET /docs` | Interactive API documentation |
 
 The machine-readable protocol schema is available at [docs/aoep.schema.json](https://github.com/abhineet-pandey/Akshauhini/blob/main/docs/aoep.schema.json).
@@ -545,6 +612,14 @@ akshauhini run python examples/connected_app.py --directory . --seconds 90
 ```bash
 akshauhini run python examples/research_team.py
 ```
+
+**Insights**
+
+```bash
+python examples/insights_demo.py
+```
+
+Records three runs of a simulated support desk at version 1.0 and three at a deliberately worse 1.1, with LLM calls, evaluations, a loop between two agents and one failure. Open **Support Desk** in the office and press **I**.
 
 **Request Studio**
 

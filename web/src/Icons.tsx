@@ -135,6 +135,18 @@ export function IconAlert({size=16,className=''}:{size?:number;className?:string
   );
 }
 
+/** Insights: a magnifier over rising bars (drawn for Akshauhini). */
+export function IconInsights({size=18,className=''}:{size?:number;className?:string}){
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <line x1="4" y1="20" x2="4" y2="14"/>
+      <line x1="9" y1="20" x2="9" y2="10"/>
+      <circle cx="16" cy="9" r="4"/>
+      <line x1="19" y1="12" x2="22" y2="15"/>
+    </svg>
+  );
+}
+
 export function IconAgents({size=18,className=''}:{size?:number;className?:string}){
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>

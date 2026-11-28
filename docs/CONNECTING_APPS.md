@@ -143,6 +143,33 @@ Select **Ollama · recorded telemetry summary** under Ask this agent, then choos
 
 Ollama integration uses the documented [chat endpoint](https://docs.ollama.com/api/chat) and [installed-model list](https://docs.ollama.com/api/tags).
 
+## 6. Make Insights useful: trace LLM calls, record evaluations, tag versions
+
+The **Insights** panel (press `I`) answers why an agent is stuck, which agent causes the latency, whether agents loop, why a run failed, who used the tokens, and whether the latest version is worse. It can only use what your app reports, so report these four things:
+
+```python
+import akshauhini
+
+office = akshauhini.init("support-bot", "Support Bot", version="1.4.0")   # 1. which version produced this run
+
+with office.llm("researcher", "gpt-4o-mini", task_id="t1", prompt=messages) as call:   # 2. every LLM call
+    reply = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
+    call.update(response=reply.choices[0].message.content,
+                input_tokens=reply.usage.prompt_tokens, output_tokens=reply.usage.completion_tokens)
+
+office.emit("handoff.started", "researcher", "t1", target_agent_id="writer")   # 3. who hands work to whom
+
+office.evaluate("answer_grounded", passed=cites_sources(answer), agent_id="writer")   # 4. was the output good?
+```
+
+- **Versions** let Insights compare a release with the previous one. `AKSHAUHINI_APP_VERSION` works too; the git commit is added automatically.
+- **LLM calls** give latency, token and cost answers. Prompts and responses are kept only with `capture_content=True` (or `AKSHAUHINI_CAPTURE_CONTENT=1`), clipped to 4,000 characters.
+- **`target_agent_id`** on `message.sent`, `handoff.started`, `task.assigned` and `question.routed` events is what loop detection follows.
+- **Evaluations** (`office.evaluate(name, score=..., passed=..., threshold=...)`) turn "is it worse?" from speed and cost into output quality.
+- A run from `init()` is marked completed when your program exits, or failed with the error if it crashes, so failure rates are accurate.
+
+From any language, send `eval.recorded` events (`data.name` plus `data.score` and/or `data.passed`) and put `version` in `/api/apps/connect` or on `run.started`. Read the answers with `GET /api/insights/runs/{run_id}`, `GET /api/insights/project?app_id=...`, or `akshauhini insights --app <app_id>`. Try `python examples/insights_demo.py` for a complete example.
+
 ## Generic HTTP / non-Python apps
 
 Register an app and its initial agents:

@@ -64,7 +64,8 @@
             "question.answered",
             "question.cancelled",
             "resource.updated",
-            "tool.dequeued"
+            "tool.dequeued",
+            "eval.recorded"
           ],
           "type": "string"
         },

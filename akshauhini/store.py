@@ -32,6 +32,17 @@ class EventStore:
             rows = self.db.execute("SELECT seq,payload FROM events WHERE run_id=? AND seq>? ORDER BY seq LIMIT ?", (run_id, after, limit)).fetchall()
         return [{**json.loads(payload), "seq": seq} for seq, payload in rows]
 
+    def all_events(self, run_id: str, max_events: int = 200_000):
+        """Every event of a run, in order (paged internally)."""
+        result, after = [], 0
+        while len(result) < max_events:
+            batch = self.events(run_id, after, 5000)
+            if not batch:
+                break
+            result += batch
+            after = batch[-1]["seq"]
+        return result
+
     def runs(self, app_id: str | None = None, limit: int = 200):
         """Latest runs, newest first. With app_id, only that app's runs: other projects never appear."""
         with self.lock:
@@ -44,13 +55,13 @@ class EventStore:
                 identity = {}
                 for (payload,) in self.db.execute("SELECT payload FROM events WHERE run_id=? AND json_extract(payload,'$.type')='run.started' ORDER BY seq", (r,)):
                     data = json.loads(payload).get("data", {})
-                    for key in ("app_id", "app_name", "title"):
+                    for key in ("app_id", "app_name", "title", "version"):
                         if isinstance(data.get(key), str) and data[key]:
                             identity[key] = data[key]
                 last_row = self.db.execute("SELECT json_extract(payload,'$.timestamp') FROM events WHERE run_id=? AND seq=?", (r, last)).fetchone()
                 if app_id and identity.get("app_id") != app_id:
                     continue
-                result.append({"run_id":r,"event_count":n,"first_seq":first,"last_seq":last,"app_id":identity.get("app_id"),"app_name":identity.get("app_name",identity.get("title")),"last_event_at":last_row[0] if last_row else None})
+                result.append({"run_id":r,"event_count":n,"first_seq":first,"last_seq":last,"app_id":identity.get("app_id"),"app_name":identity.get("app_name",identity.get("title")),"version":identity.get("version"),"last_event_at":last_row[0] if last_row else None})
                 if len(result) >= limit:
                     break
         return result
